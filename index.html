@@ -204,8 +204,14 @@
             </div>
         </div>
 
-        <div class="info-badge">
-            <strong>✅ Supabase Connected</strong> - All location data and validation details are being stored in Supabase. Maps use free OpenStreetMap.
+        <div class="config-warning" id="configWarning">
+            <h3>⚙️ Configuration Required</h3>
+            <p>Please update the following in the code (line ~270):</p>
+            <ul style="margin-top: 10px; margin-left: 20px;">
+                <li><code>SUPABASE_URL</code> - Your Supabase project URL</li>
+                <li><code>SUPABASE_KEY</code> - Your Supabase anon key</li>
+            </ul>
+            <p style="margin-top: 10px;"><strong>✅ No API key needed for maps!</strong> Using free OpenStreetMap.</p>
         </div>
 
         <div class="form-section">
