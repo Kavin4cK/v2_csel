@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Location Validation System</title>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <style>
@@ -54,11 +55,6 @@
             box-shadow: 0 4px 6px rgba(0,0,0,0.1);
         }
         
-        h2 {
-            margin-bottom: 20px;
-            color: #333;
-        }
-        
         .form-group {
             margin-bottom: 20px;
         }
@@ -106,7 +102,7 @@
             color: white;
         }
         
-        .validate-btn:hover:not(:disabled) {
+        .validate-btn:hover {
             background: #45a049;
         }
         
@@ -115,7 +111,7 @@
             color: white;
         }
         
-        .submit-btn:hover:not(:disabled) {
+        .submit-btn:hover {
             background: #5568d3;
         }
         
@@ -160,28 +156,42 @@
             background: #f8d7da;
             color: #721c24;
         }
-
-        .info-badge {
-            background: #d1ecf1;
-            border: 2px solid #17a2b8;
-            padding: 15px;
+        
+        .config-warning {
+            background: #fff3cd;
+            border: 2px solid #ffc107;
+            padding: 20px;
             border-radius: 10px;
             margin-bottom: 20px;
-            color: #0c5460;
         }
-
-        .validations-list {
-            margin-top: 20px;
-            max-height: 300px;
-            overflow-y: auto;
-        }
-
-        .validation-item {
-            background: #f8f9fa;
-            padding: 10px;
+        
+        .config-warning h3 {
+            color: #856404;
             margin-bottom: 10px;
-            border-radius: 5px;
-            border-left: 4px solid #667eea;
+        }
+        
+        .config-warning code {
+            background: #fff;
+            padding: 2px 6px;
+            border-radius: 3px;
+            color: #d63384;
+        }
+
+        .leaflet-popup-content {
+            margin: 10px;
+        }
+
+        .marker-label {
+            background: white;
+            border: 2px solid #333;
+            border-radius: 50%;
+            width: 30px;
+            height: 30px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            font-size: 14px;
         }
     </style>
 </head>
@@ -195,7 +205,7 @@
         </div>
 
         <div class="info-badge">
-            <strong>✅ Working in Test Mode</strong> - Data stored in browser memory (will reset on page refresh). Add Supabase to save permanently.
+            <strong>✅ Supabase Connected</strong> - All location data and validation details are being stored in Supabase. Maps use free OpenStreetMap.
         </div>
 
         <div class="form-section">
@@ -221,18 +231,13 @@
                 </div>
                 
                 <div class="location-info" id="locationInfo">
-                    <strong>✓ Location Captured:</strong><br>
+                    <strong>Location Captured:</strong><br>
                     Latitude: <span id="lat">-</span><br>
                     Longitude: <span id="lng">-</span>
                 </div>
                 
                 <div id="statusMessage"></div>
             </form>
-
-            <div class="validations-list" id="validationsList">
-                <h3>Recent Validations</h3>
-                <div id="validationsContainer"></div>
-            </div>
         </div>
 
         <div class="form-section">
@@ -242,20 +247,35 @@
     </div>
 
     <script>
+        // ============================================
+        // CONFIGURATION - UPDATE THESE VALUES
+        // ============================================
+        const SUPABASE_URL = 'https://outsrycgpaprpyfryaoi.supabase.co';
+        const SUPABASE_KEY = 'sb_publishable_ryP3uuWP_FrhYo0kv6aj7g_Us9jCFKR';
+        
         // Test path coordinates
         const TEST_PATH = [
             { lat: 12.9048, lng: 77.5023, name: 'Orchids The International School' },
             { lat: 12.9297, lng: 77.5001, name: 'Jnanabharathi Bus Stop' }
         ];
 
-        // Store validations in memory
-        let validations = [];
+        // Check if configuration is done
+        if (SUPABASE_URL === 'YOUR_SUPABASE_URL') {
+            document.getElementById('configWarning').style.display = 'block';
+        } else {
+            document.getElementById('configWarning').style.display = 'none';
+        }
+
+        // Initialize Supabase
+        const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+        // Global variables
         let map;
         let currentLocation = null;
         let markers = [];
         let currentMarker = null;
 
-        // Custom icons
+        // Custom icon for test path
         const blueIcon = L.icon({
             iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-blue.png',
             shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-shadow.png',
@@ -285,10 +305,11 @@
 
         // Initialize map
         function initMap() {
-            const center = [12.9172, 77.5012];
+            const center = [12.9172, 77.5012]; // Midpoint of test path
             
             map = L.map('map').setView(center, 13);
 
+            // Add OpenStreetMap tiles
             L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
                 attribution: '© OpenStreetMap contributors',
                 maxZoom: 19
@@ -308,7 +329,8 @@
                 opacity: 0.8
             }).addTo(map);
 
-            console.log('✅ Map initialized successfully');
+            // Load existing validations
+            loadValidations();
         }
 
         // Validate location
@@ -317,11 +339,8 @@
             btn.disabled = true;
             btn.textContent = '🔍 Getting location...';
 
-            console.log('Requesting location...');
-
             if (!navigator.geolocation) {
-                showStatus('❌ Geolocation is not supported by your browser', 'error');
-                console.error('Geolocation not supported');
+                showStatus('Geolocation is not supported by your browser', 'error');
                 btn.disabled = false;
                 btn.textContent = '📍 Validate Location';
                 return;
@@ -329,8 +348,6 @@
 
             navigator.geolocation.getCurrentPosition(
                 function(position) {
-                    console.log('✅ Location obtained:', position.coords);
-                    
                     currentLocation = {
                         latitude: position.coords.latitude,
                         longitude: position.coords.longitude
@@ -341,10 +358,10 @@
                     document.getElementById('locationInfo').classList.add('show');
                     document.getElementById('submitBtn').disabled = false;
                     
-                    showStatus('✅ Location captured successfully!', 'success');
+                    showStatus('Location captured successfully!', 'success');
                     btn.textContent = '✓ Location Validated';
                     
-                    // Remove previous current marker
+                    // Remove previous current marker if exists
                     if (currentMarker) {
                         map.removeLayer(currentMarker);
                     }
@@ -355,48 +372,27 @@
                     }).addTo(map);
                     currentMarker.bindPopup('<strong>Current Location</strong><br>(Not Submitted Yet)').openPopup();
                     
+                    // Pan to current location
                     map.setView([currentLocation.latitude, currentLocation.longitude], 14);
                     
                     setTimeout(() => {
                         btn.disabled = false;
-                    }, 1000);
+                    }, 2000);
                 },
                 function(error) {
-                    console.error('❌ Location error:', error);
-                    let errorMsg = 'Error getting location: ';
-                    
-                    switch(error.code) {
-                        case error.PERMISSION_DENIED:
-                            errorMsg += 'Permission denied. Please allow location access.';
-                            break;
-                        case error.POSITION_UNAVAILABLE:
-                            errorMsg += 'Location unavailable.';
-                            break;
-                        case error.TIMEOUT:
-                            errorMsg += 'Request timeout.';
-                            break;
-                        default:
-                            errorMsg += error.message;
-                    }
-                    
-                    showStatus(errorMsg, 'error');
+                    showStatus('Error getting location: ' + error.message, 'error');
                     btn.disabled = false;
                     btn.textContent = '📍 Validate Location';
-                },
-                {
-                    enableHighAccuracy: true,
-                    timeout: 10000,
-                    maximumAge: 0
                 }
             );
         });
 
         // Submit form
-        document.getElementById('validationForm').addEventListener('submit', function(e) {
+        document.getElementById('validationForm').addEventListener('submit', async function(e) {
             e.preventDefault();
 
             if (!currentLocation) {
-                showStatus('❌ Please validate your location first', 'error');
+                showStatus('Please validate your location first', 'error');
                 return;
             }
 
@@ -407,87 +403,86 @@
             submitBtn.disabled = true;
             submitBtn.textContent = '⏳ Submitting...';
 
-            // Save validation
-            const validation = {
-                id: Date.now(),
-                patrol_car_id: patrolCarId,
-                lead_officer_name: officerName,
-                latitude: currentLocation.latitude,
-                longitude: currentLocation.longitude,
-                created_at: new Date().toISOString()
-            };
+            try {
+                const { data, error } = await supabase
+                    .from('location_validations')
+                    .insert([
+                        {
+                            patrol_car_id: patrolCarId,
+                            lead_officer_name: officerName,
+                            latitude: currentLocation.latitude,
+                            longitude: currentLocation.longitude
+                        }
+                    ]);
 
-            validations.unshift(validation);
-            console.log('✅ Validation saved:', validation);
+                if (error) throw error;
 
-            showStatus('✅ Location validation submitted successfully!', 'success');
-            
-            // Remove current marker
-            if (currentMarker) {
-                map.removeLayer(currentMarker);
-                currentMarker = null;
+                showStatus('Location validation submitted successfully!', 'success');
+                
+                // Remove current marker
+                if (currentMarker) {
+                    map.removeLayer(currentMarker);
+                    currentMarker = null;
+                }
+                
+                // Reset form
+                document.getElementById('validationForm').reset();
+                document.getElementById('locationInfo').classList.remove('show');
+                currentLocation = null;
+                document.getElementById('validateBtn').textContent = '📍 Validate Location';
+                
+                // Reload validations
+                loadValidations();
+
+            } catch (error) {
+                showStatus('Error submitting: ' + error.message, 'error');
+            } finally {
+                submitBtn.disabled = true;
+                submitBtn.textContent = '✅ Submit';
             }
-            
-            // Reset form
-            document.getElementById('validationForm').reset();
-            document.getElementById('locationInfo').classList.remove('show');
-            currentLocation = null;
-            document.getElementById('validateBtn').textContent = '📍 Validate Location';
-            submitBtn.textContent = '✅ Submit';
-            
-            // Reload map markers and list
-            loadValidations();
         });
 
-        // Load validations
-        function loadValidations() {
-            // Clear existing markers
-            markers.forEach(marker => map.removeLayer(marker));
-            markers = [];
+        // Load all validations from database
+        async function loadValidations() {
+            try {
+                const { data, error } = await supabase
+                    .from('location_validations')
+                    .select('*')
+                    .order('created_at', { ascending: false });
 
-            // Add markers
-            validations.forEach((validation, index) => {
-                const marker = L.marker(
-                    [parseFloat(validation.latitude), parseFloat(validation.longitude)], 
-                    { icon: redIcon }
-                ).addTo(map);
+                if (error) throw error;
 
-                const popupContent = `
-                    <div style="min-width: 200px;">
-                        <strong>Validation #${validations.length - index}</strong><br>
-                        <strong>Patrol Car:</strong> ${validation.patrol_car_id}<br>
-                        <strong>Officer:</strong> ${validation.lead_officer_name}<br>
-                        <strong>Time:</strong> ${new Date(validation.created_at).toLocaleString()}<br>
-                        <strong>Location:</strong> ${parseFloat(validation.latitude).toFixed(6)}, ${parseFloat(validation.longitude).toFixed(6)}
-                    </div>
-                `;
+                // Clear existing validation markers
+                markers.forEach(marker => map.removeLayer(marker));
+                markers = [];
 
-                marker.bindPopup(popupContent);
-                markers.push(marker);
-            });
+                // Add markers for each validation
+                data.forEach((validation, index) => {
+                    const marker = L.marker(
+                        [parseFloat(validation.latitude), parseFloat(validation.longitude)], 
+                        { icon: redIcon }
+                    ).addTo(map);
 
-            // Update list
-            updateValidationsList();
-        }
+                    const popupContent = `
+                        <div style="min-width: 200px;">
+                            <strong>Validation #${index + 1}</strong><br>
+                            <strong>Patrol Car:</strong> ${validation.patrol_car_id}<br>
+                            <strong>Officer:</strong> ${validation.lead_officer_name}<br>
+                            <strong>Time:</strong> ${new Date(validation.created_at).toLocaleString()}<br>
+                            <strong>Location:</strong> ${parseFloat(validation.latitude).toFixed(6)}, ${parseFloat(validation.longitude).toFixed(6)}
+                        </div>
+                    `;
 
-        // Update validations list
-        function updateValidationsList() {
-            const container = document.getElementById('validationsContainer');
-            
-            if (validations.length === 0) {
-                container.innerHTML = '<p style="color: #666; padding: 10px;">No validations yet. Submit your first one!</p>';
-                return;
+                    marker.bindPopup(popupContent);
+                    markers.push(marker);
+                });
+
+            } catch (error) {
+                console.error('Error loading validations:', error);
             }
-
-            container.innerHTML = validations.map((v, index) => `
-                <div class="validation-item">
-                    <strong>#${validations.length - index}</strong> - ${v.patrol_car_id} (${v.lead_officer_name})<br>
-                    <small>${new Date(v.created_at).toLocaleString()}</small>
-                </div>
-            `).join('');
         }
 
-        // Show status
+        // Show status message
         function showStatus(message, type) {
             const statusDiv = document.getElementById('statusMessage');
             statusDiv.textContent = message;
@@ -499,30 +494,9 @@
             }, 5000);
         }
 
-        // Supabase client
-        const supabaseUrl = 'https://outsrycgpaprpyfryaoi.supabase.co';
-        const supabaseKey = 'sb_publishable_ryP3uuWP_FrhYo0kv6aj7g_Us9jCFKR';
-        const supabase = supabase.createClient(supabaseUrl, supabaseKey);
-
-        // Example function to query data
-        async function fetchData() {
-          const { data, error } = await supabase
-            .from('your_table_name')
-            .select('*');
-
-          if (error) console.error('Error fetching data:', error);
-          else console.log('Data:', data);
-        }
-
-        // Call the function to fetch data
-        fetchData();
-
-        // Initialize
+        // Initialize when page loads
         window.addEventListener('load', function() {
-            console.log('🚀 App starting...');
             initMap();
-            updateValidationsList();
-            console.log('✅ App ready!');
         });
     </script>
 </body>
